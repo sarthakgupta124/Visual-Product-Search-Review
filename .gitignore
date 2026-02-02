@@ -1,0 +1,50 @@
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env
+.env.*
+
+# Packaging/build
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editors/OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Streamlit
+.streamlit/
+
+# ML artifacts and checkpoints
+artifacts/
+*.npy
+*.h5
+*.ckpt
+*.index
+*.data-*
+
+# Tests/coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temp files
+temp_image.jpg
