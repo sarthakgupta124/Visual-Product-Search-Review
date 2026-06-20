@@ -7,6 +7,7 @@ from PIL import Image
 from src.components.inference.search_engine import SearchEngine
 from src.utils import get_custom_paths, get_training_variables
 from src.logger import get_logger
+from src.components.explain.llm_explainer import explain_rating_cached
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -159,15 +160,23 @@ with col1:
                             similarities=similarities,
                             min_sim=min_similarity
                         )
-                        
+
+                        # AI explanation
+                        st.info("Generating AI explanation with Groq...")
+                        explanation = explain_rating_cached(final_rating, top_reviews, similarities)
+
                         st.session_state.search_results = {
                             'results': results,
                             'final_rating': final_rating,
+                            'explanation': explanation,
                             'search_type': 'image'
                         }
                         
                         # Clean up
                         os.remove(temp_path)
+                        
+                        # Force Streamlit to refresh the page to show the results
+                        st.experimental_rerun()
                         
                     except Exception as e:
                         logger.error(f"Error during image search: {str(e)}")
@@ -200,12 +209,19 @@ with col1:
                             min_sim=min_similarity
                         )
                         
+                        st.info("Generating AI explanation with Groq...")
+                        explanation = explain_rating_cached(final_rating, top_reviews, similarities)
+                        
                         st.session_state.search_results = {
                             'results': results,
                             'final_rating': final_rating,
+                            'explanation': explanation,
                             'search_type': 'text',
                             'query': user_text
                         }
+                        
+                        # Force Streamlit to refresh the page to show the results
+                        st.experimental_rerun()
                         
                     except Exception as e:
                         logger.error(f"Error during text search: {str(e)}")
@@ -240,6 +256,10 @@ with col2:
             st.metric("Rating Method", "Weighted Average")
         
         st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Display the AI Explanation
+        st.markdown("### 🤖 Why this rating?")
+        st.info(results_data['explanation'])
         
         # Display search query if text search
         if results_data['search_type'] == 'text':

@@ -211,7 +211,7 @@ class SearchEngine:
             
             # 3. Return the matching rows (which contain the text reviews)
             top_results = self.df.iloc[indices[0]].copy()
-            return {"results": top_results, "scores": scores[0]}
+            return {"top_reviews": top_results, "similarities": scores[0]}
         
         except Exception as e:
             logger.error(f"Error in image search: {str(e)}")

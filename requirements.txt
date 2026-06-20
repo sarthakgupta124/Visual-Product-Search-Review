@@ -10,4 +10,8 @@ transformers==4.30.2
 
 streamlit
 faiss-cpu
+requests
+dotenv
+langchain-groq 
+langchain-core
 # -e .
