@@ -10,14 +10,15 @@ from src.components.encoders.text_encoder import TextEncoder
 from src.components.encoders.image_encoder import ImageEncoder
 from src.components.data_processing.sample_preprocessing import process_sample
 from src.components.data_ingestion import DataIngestion
+import tqdm
 
 class Trainer:
-    def __init__(self):
+    def __init__(self, text_tune_layers: int = 2, image_tune_layers: int = 15):
         try:
             self.paths = get_custom_paths()
             self.params = get_training_variables()
-            self.text_encoder = TextEncoder()
-            self.image_encoder = ImageEncoder()
+            self.text_encoder = TextEncoder(fine_tune_last_n_layers=text_tune_layers)
+            self.image_encoder = ImageEncoder(fine_tune_last_n_layers=image_tune_layers)
             self.optimizer = tf.keras.optimizers.Adam(1e-4)
             self.loss_fn = ContrastiveLoss()
             self.process_sample = process_sample
@@ -25,17 +26,21 @@ class Trainer:
         except Exception as e:
             logging.error(f"Error in Trainer initialization: {str(e)}")
             raise CustomException(e, sys)
+    @tf.function
     def train_step(self,images, input_ids, attention_mask):
         try:
             with tf.GradientTape() as tape:
                 # Reference the .model attribute created in your Encoder classes
                 img_emb = self.image_encoder.model(images, training=True)
-                txt_emb = self.text_encoder.model([input_ids, attention_mask], training=False)
+                txt_emb = self.text_encoder.model([input_ids, attention_mask], training=True)
                 loss = self.loss_fn(img_emb, txt_emb)
 
-            vars = self.image_encoder.model.trainable_variables
-            grads = tape.gradient(loss, vars)
-            self.optimizer.apply_gradients(zip(grads, vars))
+            trainable_vars = (
+                self.image_encoder.model.trainable_variables
+                + self.text_encoder.model.trainable_variables
+            )
+            grads = tape.gradient(loss, trainable_vars)
+            self.optimizer.apply_gradients(zip(grads, trainable_vars))
             return loss
         except Exception as e:
             logging.error(f"Error in train_step: {str(e)}")
@@ -72,7 +77,7 @@ class Trainer:
             for epoch in range(self.params['EPOCHS']):
                 print(f"\nEpoch {epoch+1}/{self.params['EPOCHS']}")
 
-                for images, input_ids, attention_mask in train_dataset:
+                for images, input_ids, attention_mask in tqdm.tqdm(train_dataset, desc="Training"):
                     loss = self.train_step(images, input_ids, attention_mask)
 
                 save_path = self.checkpoint_models()
@@ -122,7 +127,7 @@ class Trainer:
         
 if __name__ == "__main__":
     try:
-        trainer = Trainer()
+        trainer = Trainer(text_tune_layers= 2, image_tune_layers= 15)
         trainer.initialize_training()
     except Exception as e:
         logging.error(f"Error in main: {str(e)}")

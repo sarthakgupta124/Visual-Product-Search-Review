@@ -35,6 +35,8 @@ logs/
 
 # ML artifacts and checkpoints
 artifacts/
+Full_Roadmap_Tier1_to_Tier3_Deployment.md
+notebook/data/images/
 *.npy
 *.h5
 *.ckpt
