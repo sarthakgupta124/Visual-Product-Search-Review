@@ -1,5 +1,5 @@
 """
-Search Engine Module
+Search Engine Module : This is Cross Modal Search Engine for Multimodal Product Search and Rating Prediction
 
 This module implements the core search functionality for the multimodal product search system.
 It handles:
@@ -16,6 +16,7 @@ import os
 from typing import Tuple, Dict, Optional
 from src.logger import get_logger
 from src.utils import get_custom_paths, get_training_variables
+import faiss
 from src.components.inference.inference_helper import (
     load_encoders,
     get_text_embedding,
@@ -101,6 +102,10 @@ class SearchEngine:
                 elif len(self.review_embeddings) < len(self.df):
                     logger.error(f"Embeddings ({len(self.review_embeddings)}) < DataFrame ({len(self.df)}). Recomputing...")
                     self.review_embeddings = self._compute_review_embeddings()
+
+            # self.faiss_index = faiss.read_index("artifacts/faiss_index.bin")
+            self.text_faiss_index = faiss.read_index("artifacts/faiss_text_index.bin")
+            self.image_faiss_index = faiss.read_index("artifacts/faiss_image_index.bin")
             
             logger.info("[OK] SearchEngine initialized successfully")
             
@@ -173,32 +178,40 @@ class SearchEngine:
         try:
             logger.info(f"Searching by image: {image_path}")
             
-            # Get image embedding
-            image_embedding = get_image_embedding(image_path, self.image_encoder)
-            image_embedding = image_embedding[0]  # Remove batch dimension
+            # # Get image embedding
+            # image_embedding = get_image_embedding(image_path, self.image_encoder)
+            # image_embedding = image_embedding[0]  # Remove batch dimension
             
-            # Compute similarity scores with all reviews
-            similarities = np.dot(self.review_embeddings, image_embedding)
+            # # Compute similarity scores with all reviews
+            # similarities = np.dot(self.review_embeddings, image_embedding)
             
-            # Get top k indices
-            top_k_indices = np.argsort(similarities)[-k:][::-1]
+            # # Get top k indices
+            # top_k_indices = np.argsort(similarities)[-k:][::-1]
             
-            # Get top k reviews - ensure indices are valid
-            valid_indices = top_k_indices[top_k_indices < len(self.df)]
-            if len(valid_indices) < len(top_k_indices):
-                logger.warning(f"Some indices out of bounds. Using {len(valid_indices)} valid indices.")
+            # # Get top k reviews - ensure indices are valid
+            # valid_indices = top_k_indices[top_k_indices < len(self.df)]
+            # if len(valid_indices) < len(top_k_indices):
+            #     logger.warning(f"Some indices out of bounds. Using {len(valid_indices)} valid indices.")
             
-            top_reviews = self.df.iloc[valid_indices].copy()
-            top_similarities = similarities[valid_indices]
+            # top_reviews = self.df.iloc[valid_indices].copy()
+            # top_similarities = similarities[valid_indices]
             
-            logger.info(f"[OK] Found {len(top_reviews)} similar reviews")
+            # logger.info(f"[OK] Found {len(top_reviews)} similar reviews")
             
-            return {
-                'top_reviews': top_reviews,
-                'similarities': top_similarities,
-                'image_embedding': image_embedding,
-                'scores': similarities
-            }
+            # return {
+            #     'top_reviews': top_reviews,
+            #     'similarities': top_similarities,
+            #     'image_embedding': image_embedding,
+            #     'scores': similarities
+            # }
+            image_embedding = get_image_embedding(image_path, self.image_encoder)[0].astype("float32")
+    
+            # 2. Search against the TEXT database
+            scores, indices = self.text_faiss_index.search(image_embedding.reshape(1, -1), k)
+            
+            # 3. Return the matching rows (which contain the text reviews)
+            top_results = self.df.iloc[indices[0]].copy()
+            return {"results": top_results, "scores": scores[0]}
         
         except Exception as e:
             logger.error(f"Error in image search: {str(e)}")
@@ -226,31 +239,43 @@ class SearchEngine:
             logger.info(f"Searching by text: {text[:50]}...")
             
             # Get text embedding
-            text_embedding = get_text_embedding(text, self.text_encoder)
-            text_embedding = text_embedding[0]  # Remove batch dimension
+            # text_embedding = get_text_embedding(text, self.text_encoder)
+            # text_embedding = text_embedding[0]  # Remove batch dimension
             
-            # Compute similarity scores with all reviews
-            similarities = np.dot(self.review_embeddings, text_embedding)
+            # # Compute similarity scores with all reviews
+            # similarities = np.dot(self.review_embeddings, text_embedding)
             
-            # Get top k indices
-            top_k_indices = np.argsort(similarities)[-k:][::-1]
+            # # Get top k indices
+            # top_k_indices = np.argsort(similarities)[-k:][::-1]
             
-            # Get top k reviews - ensure indices are valid
-            valid_indices = top_k_indices[top_k_indices < len(self.df)]
-            if len(valid_indices) < len(top_k_indices):
-                logger.warning(f"Some indices out of bounds. Using {len(valid_indices)} valid indices.")
+            # # Get top k reviews - ensure indices are valid
+            # valid_indices = top_k_indices[top_k_indices < len(self.df)]
+            # if len(valid_indices) < len(top_k_indices):
+            #     logger.warning(f"Some indices out of bounds. Using {len(valid_indices)} valid indices.")
             
-            top_reviews = self.df.iloc[valid_indices].copy()
-            top_similarities = similarities[valid_indices]
+            # top_reviews = self.df.iloc[valid_indices].copy()
+            # top_similarities = similarities[valid_indices]
             
-            logger.info(f"[OK] Found {len(top_reviews)} similar reviews")
+            # logger.info(f"[OK] Found {len(top_reviews)} similar reviews")
             
-            return {
-                'top_reviews': top_reviews,
-                'similarities': top_similarities,
-                'text_embedding': text_embedding,
-                'scores': similarities
-            }
+            # return {
+            #     'top_reviews': top_reviews,
+            #     'similarities': top_similarities,
+            #     'text_embedding': text_embedding,
+            #     'scores': similarities
+            # }
+            logger.info(f"Searching for images by text: {text[:50]}...")
+            
+            # 1. Get Text Embedding
+            text_embedding = get_text_embedding(text, self.text_encoder)[0].astype("float32")
+            
+            # 2. CROSS-MODAL FIX: Search against the IMAGE database
+            scores, indices = self.image_faiss_index.search(text_embedding.reshape(1, -1), k)
+            
+            # 3. Return matching rows (which contain the image_path)
+            top_results = self.df.iloc[indices[0]].copy()
+            
+            return {"top_reviews": top_results, "similarities": scores[0]}
         
         except Exception as e:
             logger.error(f"Error in text search: {str(e)}")
