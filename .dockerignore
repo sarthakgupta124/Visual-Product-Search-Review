@@ -1,0 +1,7 @@
+.git
+logs/
+artifacts/checkpoints/
+__pycache__/
+*.pyc
+notebook/data/images/
+.env
