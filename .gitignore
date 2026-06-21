@@ -42,8 +42,6 @@ notebook/data/images/
 *.npy
 *.h5
 *.ckpt
-*.index
-*.data-*
 
 # Tests/coverage
 .pytest_cache/
