@@ -34,8 +34,10 @@ logs/
 .streamlit/
 
 # ML artifacts and checkpoints
-artifacts/
+artifacts/checkpoints/
+
 Full_Roadmap_Tier1_to_Tier3_Deployment.md
+Azure_Deployment_and_CD_Guide.md
 notebook/data/images/
 *.npy
 *.h5

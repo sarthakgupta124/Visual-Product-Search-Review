@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 notebook/data/images/
 .env
+Azure_Deployment_and_CD_Guide.md
+Full_Roadmap_Tier1_to_Tier3_Deployment.md
