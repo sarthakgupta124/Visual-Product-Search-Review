@@ -1,8 +1,30 @@
-name: Docker Build
-on: [push]
+name: Build and Deploy to Azure
+
+on:
+  push:
+    branches: [main]
+
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t multimodal-rating-system .
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Build and push image via ACR
+        run: |
+          az acr build \
+            --registry ${{ secrets.ACR_NAME }} \
+            --image multimodal-rating-system:${{ github.sha }} \
+            --file dockerfile .
+
+      - name: Deploy new image to Container App
+        run: |
+          az containerapp update \
+            --name multimodal-rating-app \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --image ${{ secrets.ACR_NAME }}.azurecr.io/multimodal-rating-system:${{ github.sha }}
