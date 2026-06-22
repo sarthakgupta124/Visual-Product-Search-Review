@@ -34,15 +34,16 @@ class SearchEngine:
     Attributes:
         image_encoder: ResNet50-based image encoder
         text_encoder: BERT-based text encoder
-        review_embeddings: Pre-computed embeddings for all reviews (numpy array)
         df: DataFrame containing all reviews with metadata
         tokenizer: BERT tokenizer
         params: Training parameters
         paths: Custom paths configuration
+        text_faiss_index: Pre-computed FAISS index for text
+        image_faiss_index: Pre-computed FAISS index for images
     """
     
     def __init__(self):
-        """Initialize the search engine by loading models and embeddings."""
+        """Initialize the search engine by loading models, dataset, and pre-computed FAISS indexes."""
         try:
             logger.info("Initializing SearchEngine...")
             
@@ -60,21 +61,6 @@ class SearchEngine:
             self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
             logger.info("[OK] Tokenizer loaded successfully")
             
-            # Load review embeddings
-            logger.info("Loading pre-computed review embeddings...")
-            embedding_path = self.paths['ingestion_data_path'].replace('.csv', '_embeddings.npy')
-            
-            if not os.path.exists(embedding_path):
-                # Try alternative path
-                embedding_path = os.path.join('artifacts', 'review_embeddings.npy')
-            
-            if os.path.exists(embedding_path):
-                self.review_embeddings = np.load(embedding_path)
-                logger.info(f"[OK] Loaded embeddings shape: {self.review_embeddings.shape}")
-            else:
-                logger.warning(f"Embedding file not found at {embedding_path}. Will compute on-the-fly.")
-                self.review_embeddings = None
-            
             # Load dataset
             logger.info("Loading dataset...")
             data_path = self.paths['ingestion_data_path']
@@ -89,23 +75,17 @@ class SearchEngine:
             self.df = self.df.dropna(subset=['review_text', 'rating']).reset_index(drop=True)
             logger.info(f"[OK] Dataset loaded: {len(self.df)} reviews")
             
-            # If embeddings not loaded, compute them
-            if self.review_embeddings is None:
-                logger.warning("Computing review embeddings (this may take a while)...")
-                self.review_embeddings = self._compute_review_embeddings()
-                logger.info(f"[OK] Computed embeddings shape: {self.review_embeddings.shape}")
-            else:
-                # Trim embeddings to match cleaned dataframe length
-                if len(self.review_embeddings) > len(self.df):
-                    logger.warning(f"Trimming embeddings from {len(self.review_embeddings)} to {len(self.df)} rows")
-                    self.review_embeddings = self.review_embeddings[:len(self.df)]
-                elif len(self.review_embeddings) < len(self.df):
-                    logger.error(f"Embeddings ({len(self.review_embeddings)}) < DataFrame ({len(self.df)}). Recomputing...")
-                    self.review_embeddings = self._compute_review_embeddings()
-
-            # self.faiss_index = faiss.read_index("artifacts/faiss_index.bin")
-            self.text_faiss_index = faiss.read_index("artifacts/faiss_text_index.bin")
-            self.image_faiss_index = faiss.read_index("artifacts/faiss_image_index.bin")
+            # Load Pre-computed FAISS Indexes directly from artifacts
+            logger.info("Loading pre-computed FAISS indexes...")
+            text_index_path = "artifacts/faiss_text_index.bin"
+            image_index_path = "artifacts/faiss_image_index.bin"
+            
+            if not os.path.exists(text_index_path) or not os.path.exists(image_index_path):
+                raise FileNotFoundError("FAISS index files are missing from the artifacts/ directory. Please compute them locally and push via Git LFS.")
+                
+            self.text_faiss_index = faiss.read_index(text_index_path)
+            self.image_faiss_index = faiss.read_index(image_index_path)
+            logger.info("[OK] FAISS Indexes loaded successfully")
             
             logger.info("[OK] SearchEngine initialized successfully")
             
@@ -116,9 +96,8 @@ class SearchEngine:
     def _compute_review_embeddings(self) -> np.ndarray:
         """
         Compute embeddings for all reviews in the dataset.
-        
-        Returns:
-            numpy array of shape (num_reviews, embedding_dim)
+        NOTE: This is retained as a utility function for local regeneration, 
+        but is deliberately bypassed in production initialization.
         """
         try:
             batch_size = self.params['BATCH_SIZE']
@@ -164,52 +143,17 @@ class SearchEngine:
     ) -> Dict:
         """
         Search for similar reviews based on a product image.
-        
-        Args:
-            image_path: Path to the product image
-            k: Number of top similar reviews to return
-        
-        Returns:
-            Dictionary containing:
-                - 'top_reviews': DataFrame of top k reviews
-                - 'similarities': Array of similarity scores
-                - 'image_embedding': The query image embedding
         """
         try:
             logger.info(f"Searching by image: {image_path}")
             
-            # # Get image embedding
-            # image_embedding = get_image_embedding(image_path, self.image_encoder)
-            # image_embedding = image_embedding[0]  # Remove batch dimension
-            
-            # # Compute similarity scores with all reviews
-            # similarities = np.dot(self.review_embeddings, image_embedding)
-            
-            # # Get top k indices
-            # top_k_indices = np.argsort(similarities)[-k:][::-1]
-            
-            # # Get top k reviews - ensure indices are valid
-            # valid_indices = top_k_indices[top_k_indices < len(self.df)]
-            # if len(valid_indices) < len(top_k_indices):
-            #     logger.warning(f"Some indices out of bounds. Using {len(valid_indices)} valid indices.")
-            
-            # top_reviews = self.df.iloc[valid_indices].copy()
-            # top_similarities = similarities[valid_indices]
-            
-            # logger.info(f"[OK] Found {len(top_reviews)} similar reviews")
-            
-            # return {
-            #     'top_reviews': top_reviews,
-            #     'similarities': top_similarities,
-            #     'image_embedding': image_embedding,
-            #     'scores': similarities
-            # }
+            # 1. Get image embedding
             image_embedding = get_image_embedding(image_path, self.image_encoder)[0].astype("float32")
     
-            # 2. Search against the TEXT database
+            # 2. Search against the TEXT database (Cross-Modal Search)
             scores, indices = self.text_faiss_index.search(image_embedding.reshape(1, -1), k)
             
-            # 3. Return the matching rows (which contain the text reviews)
+            # 3. Return the matching rows
             top_results = self.df.iloc[indices[0]].copy()
             return {"top_reviews": top_results, "similarities": scores[0]}
         
@@ -224,46 +168,8 @@ class SearchEngine:
     ) -> Dict:
         """
         Search for similar reviews based on text query.
-        
-        Args:
-            text: Query text
-            k: Number of top similar reviews to return
-        
-        Returns:
-            Dictionary containing:
-                - 'top_reviews': DataFrame of top k reviews
-                - 'similarities': Array of similarity scores
-                - 'text_embedding': The query text embedding
         """
         try:
-            logger.info(f"Searching by text: {text[:50]}...")
-            
-            # Get text embedding
-            # text_embedding = get_text_embedding(text, self.text_encoder)
-            # text_embedding = text_embedding[0]  # Remove batch dimension
-            
-            # # Compute similarity scores with all reviews
-            # similarities = np.dot(self.review_embeddings, text_embedding)
-            
-            # # Get top k indices
-            # top_k_indices = np.argsort(similarities)[-k:][::-1]
-            
-            # # Get top k reviews - ensure indices are valid
-            # valid_indices = top_k_indices[top_k_indices < len(self.df)]
-            # if len(valid_indices) < len(top_k_indices):
-            #     logger.warning(f"Some indices out of bounds. Using {len(valid_indices)} valid indices.")
-            
-            # top_reviews = self.df.iloc[valid_indices].copy()
-            # top_similarities = similarities[valid_indices]
-            
-            # logger.info(f"[OK] Found {len(top_reviews)} similar reviews")
-            
-            # return {
-            #     'top_reviews': top_reviews,
-            #     'similarities': top_similarities,
-            #     'text_embedding': text_embedding,
-            #     'scores': similarities
-            # }
             logger.info(f"Searching for images by text: {text[:50]}...")
             
             # 1. Get Text Embedding
@@ -272,7 +178,7 @@ class SearchEngine:
             # 2. CROSS-MODAL FIX: Search against the IMAGE database
             scores, indices = self.image_faiss_index.search(text_embedding.reshape(1, -1), k)
             
-            # 3. Return matching rows (which contain the image_path)
+            # 3. Return matching rows
             top_results = self.df.iloc[indices[0]].copy()
             
             return {"top_reviews": top_results, "similarities": scores[0]}
@@ -289,19 +195,6 @@ class SearchEngine:
     ) -> float:
         """
         Compute the final predicted rating based on similar reviews.
-        
-        Uses weighted average where:
-        - Only reviews with similarity >= min_sim are considered
-        - Weights are the similarity scores
-        - If no reviews meet the threshold, falls back to simple average
-        
-        Args:
-            top_reviews: DataFrame of top k similar reviews
-            similarities: Array of similarity scores for top k reviews
-            min_sim: Minimum similarity threshold (default 0.7)
-        
-        Returns:
-            Predicted rating as a float (0.0 to 5.0)
         """
         try:
             ratings = top_reviews['rating'].values.astype(float)
@@ -346,14 +239,6 @@ class SearchEngine:
     ) -> list:
         """
         Perform batch search for multiple queries.
-        
-        Args:
-            queries: List of queries (text strings or image paths)
-            query_type: 'text' or 'image'
-            k: Number of results per query
-        
-        Returns:
-            List of search results
         """
         results = []
         
@@ -376,13 +261,10 @@ class SearchEngine:
     def get_stats(self) -> Dict:
         """
         Get statistics about the search engine.
-        
-        Returns:
-            Dictionary containing various statistics
         """
         stats = {
             'num_reviews': len(self.df),
-            'embedding_dimension': self.review_embeddings.shape[1],
+            'embedding_dimension': self.text_faiss_index.d,
             'avg_rating': float(self.df['rating'].mean()),
             'rating_std': float(self.df['rating'].std()),
             'rating_min': float(self.df['rating'].min()),
